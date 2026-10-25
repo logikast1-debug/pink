@@ -40,7 +40,6 @@ class MainWindow(CTk):
         )
         self.btn.place(x=0, y=0)
 
-        # Поле чату
         self.chat_field = CTkScrollableFrame(self)
         self.chat_field.place(x=30, y=0)
 
