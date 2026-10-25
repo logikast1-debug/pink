@@ -1,0 +1,474 @@
+import base64
+import io
+import threading
+import os
+from random import randint
+from socket import socket, AF_INET, SOCK_STREAM
+
+from customtkinter import *
+from tkinter import filedialog
+from PIL import Image
+
+
+class MainWindow(CTk):
+    def __init__(self):
+        super().__init__()
+
+        # Налаштування вікна
+        self.geometry("400x300")
+        self.title("Chat Client")
+        self.username = "User"
+        self.protocol("WM_DELETE_WINDOW", self.close_app)
+
+        self.sock = None
+        self.connected = False
+        self.menu_created = False
+
+        # Бічне меню
+        self.menu_frame = CTkFrame(self, width=30, height=300)
+        self.menu_frame.pack_propagate(False)
+        self.menu_frame.place(x=0, y=0)
+
+        self.is_show_menu = False
+        self.speed_animate_menu = 20
+
+        self.btn = CTkButton(
+            self,
+            text="▶️",
+            command=self.toggle_show_menu,
+            width=30
+        )
+        self.btn.place(x=0, y=0)
+
+        # Поле чату
+        self.chat_field = CTkScrollableFrame(self)
+        self.chat_field.place(x=30, y=0)
+
+        # Поле введення повідомлення
+        self.message_entry = CTkEntry(
+            self,
+            placeholder_text="Введіть повідомлення:",
+            height=40
+        )
+        self.message_entry.bind("", self.on_enter)
+        self.message_entry.bind("", self.stars_animation)
+
+        # Кнопка відправлення
+        self.send_button = CTkButton(
+            self,
+            text=">",
+            width=50,
+            height=40,
+            command=self.send_message
+        )
+        self.send_button.place(x=350, y=260)
+
+        # Кнопка відправлення зображення
+        self.open_img_button = CTkButton(
+            self,
+            text="📂",
+            width=50,
+            height=40,
+            command=self.open_image
+        )
+        self.open_img_button.place(x=295, y=260)
+
+        # Зображення зірочок зберігаються тут під час анімації
+        self.star_emojis = ["⭐", "✨", "🌟", "💫", "✦", "✧"]
+
+        # Адаптивний інтерфейс
+        self.adaptive_ui()
+
+        # Демонстраційне зображення
+        try:
+            demo_image = CTkImage(
+                light_image=Image.open("chat.png"),
+                dark_image=Image.open("chat.png"),
+                size=(200, 200)
+            )
+            self.add_message(
+                "Демонстрація відображення зображення:",
+                demo_image
+            )
+        except Exception as e:
+            print(f"Не вдалося завантажити chat.png: {e}")
+
+        # Підключення до сервера
+        try:
+            self.sock = socket(AF_INET, SOCK_STREAM)
+            self.sock.connect(("0.tcp.eu.ngrok.io", 23811))
+            self.connected = True
+
+            hello = (
+                f"TEXT@{self.username}@"
+                f"[SYSTEM] {self.username} приєднався(лась) до чату!\n"
+            )
+            self.sock.sendall(hello.encode("utf-8"))
+
+            threading.Thread(
+                target=self.recv_message,
+                daemon=True
+            ).start()
+
+        except Exception as e:
+            self.add_message(
+                f"Не вдалося підключитися до сервера: {e}"
+            )
+
+    # Анімація під час натискання клавіш
+    def stars_animation(self, event=None):
+        print("✨ ⭐ ✨")
+
+    # Відправлення повідомлення клавішею Enter
+    def on_enter(self, event=None):
+        self.send_message()
+        return "break"
+
+    # Відкриття та закриття меню
+    def toggle_show_menu(self):
+        if self.is_show_menu:
+            self.is_show_menu = False
+            self.speed_animate_menu = -20
+            self.btn.configure(text="▶️")
+        else:
+            self.is_show_menu = True
+            self.speed_animate_menu = 20
+            self.btn.configure(text="◀️")
+
+            if not self.menu_created:
+                self.label = CTkLabel(
+                    self.menu_frame,
+                    text="Ім'я"
+                )
+                self.label.pack(pady=30)
+
+                self.entry = CTkEntry(
+                    self.menu_frame,
+                    placeholder_text="Ваш нік..."
+                )
+                self.entry.pack(padx=5, pady=5)
+
+                self.save_button = CTkButton(
+                    self.menu_frame,
+                    text="Зберегти",
+                    command=self.save_name
+                )
+                self.save_button.pack(pady=5)
+
+                self.menu_created = True
+
+        self.show_menu()
+
+    # Анімація меню
+    def show_menu(self):
+        current_width = self.menu_frame.winfo_width()
+
+        if self.is_show_menu:
+            new_width = min(200, current_width + 20)
+        else:
+            new_width = max(30, current_width - 20)
+
+        self.menu_frame.configure(width=new_width)
+
+        if new_width != (200 if self.is_show_menu else 30):
+            self.after(10, self.show_menu)
+        elif not self.is_show_menu and self.menu_created:
+            self.label.destroy()
+            self.entry.destroy()
+            self.save_button.destroy()
+            self.menu_created = False
+
+    # Збереження імені користувача
+    def save_name(self):
+        new_name = self.entry.get().strip()
+
+        if new_name:
+            self.username = new_name
+            self.add_message(f"Ваш новий нік: {self.username}")
+
+    # Адаптивний інтерфейс
+    def adaptive_ui(self):
+        if not self.winfo_exists():
+            return
+
+        window_width = self.winfo_width()
+        window_height = self.winfo_height()
+        menu_width = self.menu_frame.winfo_width()
+
+        self.menu_frame.configure(height=window_height)
+
+        self.chat_field.place(
+            x=menu_width,
+            y=0
+        )
+        self.chat_field.configure(
+            width=max(100, window_width - menu_width - 10),
+            height=max(100, window_height - 50)
+        )
+
+        input_y = window_height - 45
+
+        self.send_button.place(
+            x=window_width - 50,
+            y=input_y
+        )
+
+        self.open_img_button.place(
+            x=window_width - 105,
+            y=input_y
+        )
+
+        self.message_entry.place(
+            x=menu_width,
+            y=input_y
+        )
+        self.message_entry.configure(
+            width=max(50, window_width - menu_width - 165)
+        )
+
+        self.after(50, self.adaptive_ui)
+
+    # Додавання повідомлення в чат
+    def add_message(self, message, img=None):
+        message_frame = CTkFrame(
+            self.chat_field,
+            fg_color="#DDA0DD",
+            corner_radius=10
+        )
+        message_frame.pack(
+            pady=5,
+            padx=5,
+            anchor="w"
+        )
+
+        wraplength_size = max(
+            100,
+            self.winfo_width() - self.menu_frame.winfo_width() - 60
+        )
+
+        CTkLabel(
+            message_frame,
+            text=message,
+            wraplength=wraplength_size,
+            text_color="yellow",
+            image=img,
+            compound="top",
+            justify="left"
+        ).pack(padx=10, pady=5)
+
+    # Анімація зірочок біля кнопки відправлення
+    def animate_stars(self):
+        start_x = self.send_button.winfo_x()
+        start_y = self.send_button.winfo_y()
+
+        for i in range(12):
+            star = CTkLabel(
+                self,
+                text=self.star_emojis[
+                    randint(0, len(self.star_emojis) - 1)
+                ],
+                font=("Arial", randint(16, 25)),
+                fg_color="transparent"
+            )
+
+            x = start_x + randint(-45, 45)
+            y = start_y + randint(-10, 10)
+
+            star.place(x=x, y=y)
+
+            self.move_star(
+                star,
+                x,
+                y,
+                randint(-3, 3),
+                0
+            )
+
+    # Рух зірочок угору
+    def move_star(self, star, x, y, dx, step):
+        if step >= 20:
+            star.destroy()
+            return
+
+        x += dx
+        y -= 5
+
+        star.place(x=x, y=y)
+
+        self.after(
+            35,
+            lambda: self.move_star(
+                star, x, y, dx, step + 1
+            )
+        )
+
+    # Відправлення текстового повідомлення
+    def send_message(self):
+        message = self.message_entry.get().strip()
+
+        if not message:
+            return
+
+        self.animate_stars()
+
+        self.add_message(f"{self.username}: {message}")
+
+        if self.connected and self.sock:
+            data = f"TEXT@{self.username}@{message}\n"
+
+            try:
+                self.sock.sendall(data.encode("utf-8"))
+            except OSError as e:
+                self.add_message(
+                    f"Помилка відправлення повідомлення: {e}"
+                )
+
+        self.message_entry.delete(0, END)
+
+    # Отримання повідомлень від сервера
+    def recv_message(self):
+        buffer = ""
+
+        while True:
+            try:
+                chunk = self.sock.recv(4096)
+
+                if not chunk:
+                    break
+
+                buffer += chunk.decode(
+                    "utf-8",
+                    errors="ignore"
+                )
+
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+
+                    # Звертаємося до GUI з головного потоку
+                    self.after(
+                        0,
+                        lambda msg=line.strip(): self.handle_line(msg)
+                    )
+
+            except (OSError, RuntimeError):
+                break
+
+        self.connected = False
+
+    # Обробка повідомлень від сервера
+    def handle_line(self, line):
+        if not line:
+            return
+
+        parts = line.split("@", 3)
+        msg_type = parts[0]
+
+        if msg_type == "TEXT":
+            if len(parts) >= 3:
+                author = parts[1]
+                message = parts[2]
+                self.add_message(f"{author}: {message}")
+
+        elif msg_type == "IMAGE":
+            if len(parts) >= 4:
+                author = parts[1]
+                filename = parts[2]
+                b64_img = parts[3]
+
+                try:
+                    img_data = base64.b64decode(b64_img)
+                    pil_img = Image.open(
+                        io.BytesIO(img_data)
+                    )
+
+                    ctk_img = CTkImage(
+                        light_image=pil_img,
+                        dark_image=pil_img,
+                        size=(300, 300)
+                    )
+
+                    self.add_message(
+                        f"{author} надіслав(ла) зображення: {filename}",
+                        img=ctk_img
+                    )
+
+                except Exception as e:
+                    self.add_message(
+                        f"Помилка відображення зображення: {e}"
+                    )
+
+        else:
+            self.add_message(line)
+
+    # Вибір та відправлення зображення
+    def open_image(self):
+        if not self.connected or not self.sock:
+            self.add_message(
+                "Немає підключення до сервера."
+            )
+            return
+
+        file_name = filedialog.askopenfilename(
+            title="Виберіть зображення",
+            filetypes=[
+                ("Зображення", "*.png *.jpg *.jpeg *.gif *.bmp"),
+                ("Усі файли", "*.*")
+            ]
+        )
+
+        if not file_name:
+            return
+
+        try:
+            with open(file_name, "rb") as f:
+                raw = f.read()
+
+            b64_data = base64.b64encode(raw).decode("ascii")
+            short_name = os.path.basename(file_name)
+
+            data = (
+                f"IMAGE@{self.username}@"
+                f"{short_name}@{b64_data}\n"
+            )
+
+            self.sock.sendall(data.encode("utf-8"))
+
+            pil_img = Image.open(file_name)
+
+            ctk_img = CTkImage(
+                light_image=pil_img,
+                dark_image=pil_img,
+                size=(300, 300)
+            )
+
+            self.add_message(
+                f"Ви надіслали зображення: {short_name}",
+                img=ctk_img
+            )
+
+        except Exception as e:
+            self.add_message(
+                f"Не вдалося надіслати зображення: {e}"
+            )
+
+    # Закриття вікна та мережевого з'єднання
+    def close_app(self):
+        self.connected = False
+
+        if self.sock:
+            try:
+                self.sock.shutdown(2)
+            except OSError:
+                pass
+
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+
+        self.destroy()
+
+
+if __name__ == "__main__":
+    win = MainWindow()
+    win.mainloop()
